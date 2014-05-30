@@ -13,7 +13,7 @@
 
 
 // the source that we intend to mirror
-$f_origin = 'http://cdn.com';
+$f_origin = 'http://forums.urbackup.org';
 
 // encode as filename-safe base64
 $f_name = strtr(base64_encode($_SERVER['REQUEST_URI']), '+/=', '-_,');
@@ -32,7 +32,7 @@ function send_file($f_path)
 		{
 			continue;
 		}
-		header($elem);
+		header($elem, false);
 	}
 	
 	if(strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== false 
