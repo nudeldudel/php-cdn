@@ -12,8 +12,6 @@
 /////////////////////////////////////////////////////////////////////////
 // error_reporting(E_ERROR | E_PARSE);
 
-// cache for N seconds (default 1 day)
-$f_expires = 86400;
 
 // the source that we intend to mirror
 $f_origin = 'http://cdn.com';
@@ -24,24 +22,31 @@ $f_name = strtr(base64_encode($_SERVER['REQUEST_URI']), '+/=', '-_,');
 // parse the file extension
 $f_ext = strrchr(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '.');
 
-// assign the correct mime type
-switch ($f_ext) {
-	// images
-	case '.gif'  : $f_type = 'image/gif';                break;
-	case '.jpg'  : $f_type = 'image/jpeg';               break;
-	case '.png'  : $f_type = 'image/png';                break;
-	case '.ico'  : $f_type = 'image/x-icon';             break;
-	// documents
-	case '.js'   : $f_type = 'application/x-javascript'; break;
-	case '.css'  : $f_type = 'text/css';                 break;
-	case '.xml'  : $f_type = 'text/xml';                 break;
-	case '.json' : $f_type = 'application/json';         break;
-	// no match
-	default      :
-		// extension is not supported, issue *404*
-		header($_SERVER['SERVER_PROTOCOL'] . ' 404 Not Found');
-		header('Cache-Control: private');
-		exit;
+
+function send_file($f_path)
+{
+	
+	$header = file_get_contents($f_path . ".header");
+	$header_list = explode("\r\n", $header);
+	foreach ($header_list as &$elem) {
+		if(strpos(strtolower($elem), "transfer-encoding:")===0)
+		{
+			continue;
+		}
+		header($elem);
+	}
+	
+	if(strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== false 
+	   && file_exists($f_path . ".gz") )
+	{
+		header("Content-Encoding: gzip");
+		readfile($f_path . ".gz");
+	}
+	else
+	{
+		// stream the file
+		readfile($f_path);
+	}
 }
 
 // construct usable file path
@@ -59,15 +64,7 @@ if (file_exists($f_path)) {
 		// client has a valid cache, issue *304*
 		header($_SERVER['SERVER_PROTOCOL'] . ' 304 Not Modified');
 	} else {
-		// send all requisite cache-me-please! headers
-		header('Pragma: public');
-		header("Cache-Control: max-age={$f_expires}");
-		header("Content-type: {$f_type}");
-		header('Last-Modified: ' . gmdate('D, d M Y H:i:s \G\M\T', $f_modified));
-		header('Expires: ' . gmdate('D, d M Y H:i:s \G\M\T', time() + $f_expires));
-		
-		// stream the file
-		readfile($f_path);
+		send_file($f_path);
 	}
 } else {
 	// http *HEAD* request 
@@ -88,6 +85,7 @@ if (file_exists($f_path)) {
 	// we have located the remote file
 	if (curl_exec($ch) !== false) {
 		$fp = fopen($f_path, 'a+b');
+		$file_ok = false;
 		if(flock($fp, LOCK_EX | LOCK_NB)) {
 			// empty *possible* contents
 			ftruncate($fp, 0);
@@ -103,16 +101,34 @@ if (file_exists($f_path)) {
 				CURLOPT_FAILONERROR    => 1,
 				CURLOPT_RETURNTRANSFER => 1,
 				CURLOPT_BINARYTRANSFER => 1,
-				CURLOPT_HEADER         => 0,
-				CURLOPT_FILE           => $fp
-				// CURLOPT_FOLLOWLOCATION => 1, 
+				CURLOPT_HEADER         => 1,
+				CURLOPT_RETURNTRANSFER => 1,
+				CURLOPT_FOLLOWLOCATION => 1, 
 			));
 				
+			$response = curl_exec($ch2);
+			
 			// did the transfer complete?
-			if (curl_exec($ch2) === false) {
+			if ( $response === false) {
 				// something went wrong, null 
 				// the file just in case >.>
 				ftruncate($fp, 0); 
+			}
+			else
+			{
+				list($header, $body) = explode("\r\n\r\n", $response, 2);
+				fwrite($fp, $body);
+				$fp_header = fopen($f_path . ".header", 'w');
+				fwrite($fp_header, $header);
+				fclose($fp_header);
+				$file_ok = true;
+				
+				if($f_ext == ".css" || $f_ext == ".js")
+				{
+					$fp_gzipped = fopen($f_path . ".gz", 'w');
+					fwrite($fp_gzipped, gzencode($body));
+					fclose($fp_gzipped);
+				}
 			}
 				
 			// 1) flush output to the file
@@ -125,9 +141,17 @@ if (file_exists($f_path)) {
 				
 		// close the file
 		fclose($fp);
-			
-		// issue *302* for *this* request
-		header('Location: ' . $f_origin . $_SERVER['REQUEST_URI']);
+		
+		if($file_ok)
+		{
+			send_file($f_path);
+		}
+		else
+		{
+			// issue *302* for *this* request
+			header('Location: ' . $f_origin . $_SERVER['REQUEST_URI']);
+		}
+		
 	} else {
 		// the file doesn't exist, issue *404*
 		header($_SERVER['SERVER_PROTOCOL'] . ' 404 Not Found');
