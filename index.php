@@ -1,5 +1,4 @@
 <?php
-
 // php-cdn
 // dynamic file caching pseudo cdn
 /////////////////////////////////////////////////////////////////////////
@@ -108,6 +107,8 @@ if (file_exists($f_path)) {
 				
 			$response = curl_exec($ch2);
 			
+			$has_modified = false;
+			
 			// did the transfer complete?
 			if ( $response === false) {
 				// something went wrong, null 
@@ -123,6 +124,18 @@ if (file_exists($f_path)) {
 				fclose($fp_header);
 				$file_ok = true;
 				
+				$header_list = explode("\r\n", $header);
+
+				foreach ($header_list as &$elem) {
+					if(strpos(strtolower($elem), "last-modified:")===0)
+					{
+						$e_time = substr($elem, strpos($elem, ":") + 1);
+						$f_modified = strtotime($e_time);
+						$has_modified= $f_modified!==false;
+						break;
+					}
+				}
+				
 				if($f_ext == ".css" || $f_ext == ".js")
 				{
 					$fp_gzipped = fopen($f_path . ".gz", 'w');
@@ -137,6 +150,11 @@ if (file_exists($f_path)) {
 			fflush($fp);
 			flock($fp, LOCK_UN);
 			curl_close($ch2);
+			
+			if($has_modified===true)
+			{
+				touch($f_path, $f_modified);
+			}
 		}
 				
 		// close the file
