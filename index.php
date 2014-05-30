@@ -22,27 +22,43 @@ $f_name = strtr(base64_encode($_SERVER['REQUEST_URI']), '+/=', '-_,');
 $f_ext = strrchr(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '.');
 
 
-function send_file($f_path)
+function send_file($f_path, $f_modified)
 {
 	
 	$header = file_get_contents($f_path . ".header");
 	$header_list = explode("\r\n", $header);
+	$has_last_modified=false;
 	foreach ($header_list as &$elem) {
 		if(strpos(strtolower($elem), "transfer-encoding:")===0)
 		{
 			continue;
 		}
+		if(strpos(strtolower($elem), "content-length:")===0)
+		{
+			continue;
+		}
+		if(strpos(strtolower($elem), "last-modified:")===0)
+		{
+			$has_last_modified=true;
+		}
 		header($elem, false);
+	}
+	
+	if($has_last_modified===false)
+	{
+		header('Last-Modified: ' . gmdate('D, d M Y H:i:s \G\M\T', $f_modified));
 	}
 	
 	if(strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== false 
 	   && file_exists($f_path . ".gz") )
 	{
 		header("Content-Encoding: gzip");
+		header("Content-length: " . filesize($f_path . ".gz"));
 		readfile($f_path . ".gz");
 	}
 	else
 	{
+		header("Content-length: " . filesize($f_path));
 		// stream the file
 		readfile($f_path);
 	}
@@ -63,7 +79,7 @@ if (file_exists($f_path)) {
 		// client has a valid cache, issue *304*
 		header($_SERVER['SERVER_PROTOCOL'] . ' 304 Not Modified');
 	} else {
-		send_file($f_path);
+		send_file($f_path, $f_modified);
 	}
 } else {
 	// http *HEAD* request 
@@ -160,9 +176,14 @@ if (file_exists($f_path)) {
 		// close the file
 		fclose($fp);
 		
+		if($has_modified===false)
+		{
+			$f_modified = filemtime($f_path);
+		}
+		
 		if($file_ok)
 		{
-			send_file($f_path);
+			send_file($f_path, $f_modified);
 		}
 		else
 		{
