@@ -28,6 +28,7 @@ function send_file($f_path, $f_modified)
 	$header = file_get_contents($f_path . ".header");
 	$header_list = explode("\r\n", $header);
 	$has_last_modified=false;
+	$has_location=false;
 	foreach ($header_list as &$elem) {
 		if(strpos(strtolower($elem), "transfer-encoding:")===0)
 		{
@@ -37,9 +38,17 @@ function send_file($f_path, $f_modified)
 		{
 			continue;
 		}
+		if(strpos(strtolower($elem), "connection:")===0)
+		{
+			continue;
+		}
 		if(strpos(strtolower($elem), "last-modified:")===0)
 		{
 			$has_last_modified=true;
+		}
+		if(strpos(strtolower($elem), "location:")===0)
+		{
+			$has_location=true;
 		}
 		header($elem, false);
 	}
@@ -49,18 +58,25 @@ function send_file($f_path, $f_modified)
 		header('Last-Modified: ' . gmdate('D, d M Y H:i:s \G\M\T', $f_modified));
 	}
 	
-	if(strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== false 
-	   && file_exists($f_path . ".gz") )
+	if($has_location===false)
 	{
-		header("Content-Encoding: gzip");
-		header("Content-length: " . filesize($f_path . ".gz"));
-		readfile($f_path . ".gz");
+		if(strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== false 
+		   && file_exists($f_path . ".gz") )
+		{
+			header("Content-Encoding: gzip");
+			header("Content-length: " . filesize($f_path . ".gz"));
+			readfile($f_path . ".gz");
+		}
+		else
+		{
+			header("Content-length: " . filesize($f_path));
+			// stream the file
+			readfile($f_path);
+		}
 	}
 	else
 	{
-		header("Content-length: " . filesize($f_path));
-		// stream the file
-		readfile($f_path);
+		die("has location");
 	}
 }
 
@@ -94,6 +110,7 @@ if (file_exists($f_path)) {
 		CURLOPT_BINARYTRANSFER => 1,
 		CURLOPT_HEADER         => 0,
 		CURLOPT_NOBODY         => 1,
+		CURLOPT_HTTPGET		   => 1
 		// CURLOPT_FOLLOWLOCATION => 1, 
 	));
 	
@@ -118,8 +135,12 @@ if (file_exists($f_path)) {
 				CURLOPT_BINARYTRANSFER => 1,
 				CURLOPT_HEADER         => 1,
 				CURLOPT_RETURNTRANSFER => 1,
-				CURLOPT_FOLLOWLOCATION => 1, 
+				CURLOPT_FOLLOWLOCATION => 1
 			));
+			
+			if(file_exists(getcwd() . "/ca.crt")) {
+				curl_setopt($ch2, CURLOPT_CAINFO, getcwd() . "/ca.crt");
+			}
 				
 			$response = curl_exec($ch2);
 			
@@ -130,10 +151,16 @@ if (file_exists($f_path)) {
 				// something went wrong, null 
 				// the file just in case >.>
 				ftruncate($fp, 0); 
+				die(curl_error($response));
 			}
 			else
 			{
-				list($header, $body) = explode("\r\n\r\n", $response, 2);
+				$body=$response;
+				while(strpos($body, "HTTP/1.1 3")==0 && strpos($body, "\r\n\r\n")!==false)
+				{
+					list($header, $body) = explode("\r\n\r\n", $body, 2);
+				}
+				
 				fwrite($fp, $body);
 				$fp_header = fopen($f_path . ".header", 'w');
 				fwrite($fp_header, $header);
@@ -171,6 +198,10 @@ if (file_exists($f_path)) {
 			{
 				touch($f_path, $f_modified);
 			}
+		}
+		else
+		{
+			//die("Could not lock ".$f_path);
 		}
 				
 		// close the file
