@@ -155,11 +155,7 @@ if (file_exists($f_path)) {
 			}
 			else
 			{
-				$body=$response;
-				while(strpos($body, "HTTP/1.1 3")==0 && strpos($body, "\r\n\r\n")!==false)
-				{
-					list($header, $body) = explode("\r\n\r\n", $body, 2);
-				}
+				list($header, $body) = explode("\r\n\r\n", $response, 2);
 				
 				fwrite($fp, $body);
 				$fp_header = fopen($f_path . ".header", 'w');
